@@ -1,0 +1,320 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChatType {
+  PRIVATE
+  GROUP
+}
+
+enum ChatRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+model User {
+  id                String      @id @default(uuid())
+  phone             String      @unique
+  displayName       String?
+  firstName         String?
+  lastName          String?
+  bio               String?
+  avatarAttachmentId String?
+  locale            String      @default("ru")
+  cloudPasswordHash String?
+  isAdmin           Boolean     @default(false)
+  isBanned          Boolean     @default(false)
+  bannedReason      String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  avatarAttachment Attachment? @relation("user_avatar", fields: [avatarAttachmentId], references: [id], onDelete: SetNull)
+  devices       Device[]
+  sessions      Session[]
+  chatMembers   ChatMember[]
+  sentMessages  Message[]     @relation("message_sender")
+  uploadedFiles Attachment[]  @relation("attachment_uploader")
+  contacts      Contact[]     @relation("contact_owner")
+  inContacts    Contact[]     @relation("contact_target")
+  posts         Post[]        @relation("post_author")
+  postLikes     PostLike[]    @relation("post_like_user")
+  keys          UserKey[]
+  reportsMade   Report[]      @relation("reports_made")
+  reportsTarget Report[]      @relation("reports_target")
+  bansTarget    Ban[]         @relation("ban_target")
+  bansBy        Ban[]         @relation("ban_actor")
+  blocksBy      Block[]       @relation("block_actor")
+  blockedBy     Block[]       @relation("block_target")
+  auditLogs     AuditLog[]
+  recoveryCodes RecoveryCode[]
+
+  @@index([createdAt])
+  @@index([firstName, lastName])
+}
+
+model Device {
+  id          String    @id @default(uuid())
+  userId      String
+  deviceHash  String
+  deviceName  String?
+  userAgent   String?
+  ipAddress   String?
+  trusted     Boolean   @default(false)
+  lastSeenAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions    Session[]
+
+  @@unique([userId, deviceHash])
+  @@index([userId])
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  deviceId         String
+  refreshTokenHash String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device           Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([deviceId])
+}
+
+model Chat {
+  id          String      @id @default(uuid())
+  type        ChatType
+  title       String?
+  ownerId     String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  members     ChatMember[]
+  messages    Message[]
+  reports     Report[]
+
+  @@index([type])
+}
+
+model ChatMember {
+  id          String      @id @default(uuid())
+  chatId      String
+  userId      String
+  role        ChatRole    @default(MEMBER)
+  joinedAt    DateTime    @default(now())
+
+  chat        Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id              String      @id @default(uuid())
+  chatId          String
+  senderId        String
+  type            MessageType
+  text            String?
+  attachmentId    String?
+  replyToId       String?
+  editedAt        DateTime?
+  deletedForAllAt DateTime?
+  createdAt       DateTime    @default(now())
+
+  chat            Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender          User        @relation("message_sender", fields: [senderId], references: [id], onDelete: Cascade)
+  attachment      Attachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  replyTo         Message?    @relation("message_reply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies         Message[]   @relation("message_reply")
+  reports         Report[]
+
+  @@index([chatId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model Attachment {
+  id           String    @id @default(uuid())
+  uploaderId   String
+  filePath     String
+  previewPath  String
+  mimeType     String
+  sizeBytes    Int
+  width        Int?
+  height       Int?
+  createdAt    DateTime  @default(now())
+
+  uploader     User      @relation("attachment_uploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  avatarOfUsers User[]   @relation("user_avatar")
+  posts        Post[]    @relation("post_attachment")
+
+  @@index([uploaderId, createdAt])
+}
+
+model Contact {
+  id        String   @id @default(uuid())
+  ownerId   String
+  targetId  String
+  createdAt DateTime @default(now())
+
+  owner     User     @relation("contact_owner", fields: [ownerId], references: [id], onDelete: Cascade)
+  target    User     @relation("contact_target", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, targetId])
+  @@index([ownerId, createdAt])
+}
+
+model Post {
+  id           String      @id @default(uuid())
+  authorId     String
+  text         String?
+  attachmentId String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  author       User        @relation("post_author", fields: [authorId], references: [id], onDelete: Cascade)
+  attachment   Attachment? @relation("post_attachment", fields: [attachmentId], references: [id], onDelete: SetNull)
+  likes        PostLike[]  @relation("post_likes")
+
+  @@index([authorId, createdAt])
+}
+
+model PostLike {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post      Post     @relation("post_likes", fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation("post_like_user", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId, createdAt])
+}
+
+model UserKey {
+  id                   String    @id @default(uuid())
+  userId               String
+  deviceId             String?
+  keyType              String
+  publicKey            String
+  encryptedPrivateKey  String?
+  keyVersion           Int       @default(1)
+  rotatedAt            DateTime?
+  createdAt            DateTime  @default(now())
+
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, keyType])
+}
+
+model OtpCode {
+  id          String    @id @default(uuid())
+  phone       String
+  codeHash    String
+  expiresAt   DateTime
+  attempts    Int       @default(0)
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model RecoveryCode {
+  id         String    @id @default(uuid())
+  userId     String
+  codeHash   String
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Report {
+  id             String        @id @default(uuid())
+  reporterId     String
+  targetUserId   String?
+  chatId         String?
+  messageId      String?
+  reason         String
+  status         ReportStatus  @default(OPEN)
+  moderatorNote  String?
+  createdAt      DateTime      @default(now())
+  resolvedAt     DateTime?
+
+  reporter       User          @relation("reports_made", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUser     User?         @relation("reports_target", fields: [targetUserId], references: [id], onDelete: SetNull)
+  chat           Chat?         @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  message        Message?      @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+model Ban {
+  id            String    @id @default(uuid())
+  userId        String
+  bannedById    String
+  reason        String
+  startsAt      DateTime  @default(now())
+  endsAt        DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  user          User      @relation("ban_target", fields: [userId], references: [id], onDelete: Cascade)
+  bannedBy      User      @relation("ban_actor", fields: [bannedById], references: [id], onDelete: Restrict)
+
+  @@index([userId, revokedAt])
+}
+
+model Block {
+  id            String    @id @default(uuid())
+  actorId       String
+  targetId      String
+  createdAt     DateTime  @default(now())
+
+  actor         User      @relation("block_actor", fields: [actorId], references: [id], onDelete: Cascade)
+  target        User      @relation("block_target", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([actorId, targetId])
+}
+
+model AuditLog {
+  id            String    @id @default(uuid())
+  actorUserId   String?
+  action        String
+  targetType    String
+  targetId      String?
+  ipAddress     String?
+  userAgent     String?
+  meta          Json?
+  createdAt     DateTime  @default(now())
+
+  actor         User?     @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+}
